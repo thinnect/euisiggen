@@ -285,7 +285,7 @@ func main() {
 		Sigdir      string       `long:"sigdir" default:"sigdata" description:"Where to store EUI_XXXXXXXXXXXXXXXX.bin files."`
 		Euifile     string       `long:"euifile" default:"eui.txt" description:"The file containing available EUIs."`
 		ShowVersion func()       `short:"V" description:"Show generator version."`
-		Debug       bool         `long:"debug" default:"false" description:"The file containing available EUIs."`
+		Debug       bool         `long:"debug" description:"The file containing available EUIs."`
 	}
 
 	opts.ShowVersion = func() {
@@ -295,6 +295,7 @@ func main() {
 
 	_, err := flags.Parse(&opts)
 	if err != nil {
+		fmt.Printf("ERROR parsing arguments\n")
 		os.Exit(1)
 	}
 
