@@ -19,7 +19,7 @@ import "github.com/jessevdk/go-flags"
 import "github.com/joaojeronimo/go-crc16"
 import "github.com/satori/go.uuid"
 
-var g_version_major uint8 = 1
+var g_version_major uint8 = 2
 var g_version_minor uint8 = 0
 var g_version_patch uint8 = 0
 
