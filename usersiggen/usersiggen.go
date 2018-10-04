@@ -17,6 +17,7 @@ import "path/filepath"
 
 import "github.com/jessevdk/go-flags"
 import "github.com/joaojeronimo/go-crc16"
+import "github.com/satori/go.uuid"
 
 var g_version_major uint8 = 1
 var g_version_minor uint8 = 0
@@ -27,6 +28,7 @@ type UserSignature struct {
 	version_minor uint8
 	version_patch uint8
 
+	signature_size uint16
 	eui64 uint64
 
 	year    uint16 // nx_uint16_t year;
@@ -44,14 +46,19 @@ type UserSignature struct {
 	pcb_version_minor    uint8 // nx_uint8_t pcb_version_minor;
 	pcb_version_assembly uint8 // nx_uint8_t pcb_version_assembly;
 
-	// 0xFF up to 766 bytes
+	board_uuid [16]byte
+	manufacturer_uuid [16]byte
+
 	// crc uint16
 }
 
-func (self *UserSignature) Construct(t time.Time, eui64 uint64, boardname string, boardversion BoardVersion) error {
+func (self *UserSignature) Construct(t time.Time, eui64 uint64, boardname string, boardversion BoardVersion, boarduuid string, manufuuid string) error {
+	var err error
 	self.version_major = g_version_major
 	self.version_minor = g_version_minor
 	self.version_patch = g_version_patch
+
+	self.signature_size = uint16(binary.Size(self)) + 2
 	self.eui64 = eui64
 
 	// datetime
@@ -76,6 +83,16 @@ func (self *UserSignature) Construct(t time.Time, eui64 uint64, boardname string
 	self.pcb_version_major = boardversion.major
 	self.pcb_version_minor = boardversion.minor
 	self.pcb_version_assembly = boardversion.assembly
+
+	self.board_uuid, err = uuid.FromString(boarduuid)
+	if err != nil {
+		return errors.New(fmt.Sprintf("Board UUID error(%d)", err))
+	}
+
+	self.manufacturer_uuid, err = uuid.FromString(manufuuid)
+	if err != nil {
+		return errors.New(fmt.Sprintf("Manufacturer UUID error(%d)", err))
+	}
 
 	return nil
 }
@@ -103,14 +120,6 @@ func (self *UserSignature) Serialize() ([]byte, error) {
 	err = binary.Write(buf, binary.BigEndian, self)
 	if err != nil {
 		return nil, err
-	}
-
-	// Fill up with 0xFF, leave 2 bytes in the end for CRC
-	for i := buf.Len(); i < 768-2; i++ {
-		err = binary.Write(buf, binary.BigEndian, byte(0xFF))
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	crc := crc16.Crc16(buf.Bytes())
@@ -174,6 +183,7 @@ func parseEui(s string) (uint64, error) {
 		return 0, errors.New(fmt.Sprintf("%s is not a valid EUI-64", s))
 	}
 
+
 	return eui, nil
 }
 
@@ -229,10 +239,10 @@ func markEui(infile string, sig UserSignature) error {
 	marked := false
 	for scanner.Scan() {
 		t := strings.TrimSpace(scanner.Text())
-		//fmt.Printf("l %d %s\n", len(splits), splits)
 
 		if strings.HasPrefix(t, "#") == false {
 			splits := strings.Split(t, ",")
+
 			if !marked && (len(splits) == 1 || (len(splits) == 2 && len(splits[1]) == 0)) {
 				val, err := parseEui(splits[0])
 				if err != nil {
@@ -240,7 +250,7 @@ func markEui(infile string, sig UserSignature) error {
 				}
 
 				if val == sig.eui64 {
-					m := fmt.Sprintf("%s,%s,%d", sig.BoardName(), sig.BoardVersion(), sig.unix_time)
+					m := fmt.Sprintf("%s,%s,%d,%x,%x", sig.BoardName(), sig.BoardVersion(), sig.unix_time, sig.board_uuid, sig.manufacturer_uuid)
 					writer.WriteString(fmt.Sprintf("%s,%s", splits[0], m))
 					marked = true
 				} else if !marked {
@@ -281,6 +291,8 @@ func main() {
 	var opts struct {
 		Boardname   string       `long:"boardname" required:"true" description:"The name of the PCB that the user signature will be used for."`
 		Version     BoardVersion `long:"version" required:"true" description:"The version of the board X.Y.Z."`
+		Board_uuid 	string 	 	 `long:"boarduuid" required:"true" description:"Board UUID. 16 bytes"`
+		Manuf_uuid 	string 		 `long:"manuuid" required:"true" description:"Manufacturer UUID. 16 bytes"`
 		Output      string       `long:"out" default:"sigdata.bin" description:"The output file name."`
 		Sigdir      string       `long:"sigdir" default:"sigdata" description:"Where to store EUI_XXXXXXXXXXXXXXXX.bin files."`
 		Euifile     string       `long:"euifile" default:"eui.txt" description:"The file containing available EUIs."`
@@ -322,7 +334,7 @@ func main() {
 	var sig UserSignature
 	timestamp := time.Now().UTC()
 
-	err = sig.Construct(timestamp, eui, opts.Boardname, opts.Version)
+	err = sig.Construct(timestamp, eui, opts.Boardname, opts.Version, opts.Board_uuid, opts.Manuf_uuid)
 	if err != nil {
 		fmt.Printf("ERROR generating sigdata: %s\n", err)
 		os.Exit(1)
