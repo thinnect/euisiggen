@@ -19,7 +19,7 @@ import "github.com/jessevdk/go-flags"
 import "github.com/joaojeronimo/go-crc16"
 import "github.com/satori/go.uuid"
 
-var g_version_major uint8 = 2
+var g_version_major uint8 = 3
 var g_version_minor uint8 = 0
 var g_version_patch uint8 = 0
 
@@ -29,6 +29,7 @@ type UserSignature struct {
 	version_patch uint8
 
 	signature_size uint16
+	signature_type uint8
 	eui64 uint64
 
 	year    uint16 // nx_uint16_t year;
@@ -52,13 +53,14 @@ type UserSignature struct {
 	// crc uint16
 }
 
-func (self *UserSignature) Construct(t time.Time, eui64 uint64, boardname string, boardversion BoardVersion, boarduuid string, manufuuid string) error {
+func (self *UserSignature) Construct(t time.Time, eui64 uint64, boardname string, boardversion BoardVersion, boarduuid string, manufuuid string, signature_type uint8) error {
 	var err error
 	self.version_major = g_version_major
 	self.version_minor = g_version_minor
 	self.version_patch = g_version_patch
 
 	self.signature_size = uint16(binary.Size(self)) + 2
+	self.signature_type = signature_type
 	self.eui64 = eui64
 
 	// datetime
@@ -296,9 +298,12 @@ func main() {
 		Output      string       `long:"out" default:"sigdata.bin" description:"The output file name."`
 		Sigdir      string       `long:"sigdir" default:"sigdata" description:"Where to store EUI_XXXXXXXXXXXXXXXX.bin files."`
 		Euifile     string       `long:"euifile" default:"eui.txt" description:"The file containing available EUIs."`
+		Sign_type   uint8        `long:"type" required:"true" description:"Signature type."`
 		ShowVersion func()       `short:"V" description:"Show generator version."`
 		Debug       bool         `long:"debug" description:"The file containing available EUIs."`
 	}
+
+	var eui uint64
 
 	opts.ShowVersion = func() {
 		printGeneratorVersion()
@@ -319,10 +324,14 @@ func main() {
 		}
 	}
 
-	eui, err := getEui(opts.Euifile)
-	if err != nil {
-		fmt.Printf("ERROR getting EUI64: %s\n", err)
-		os.Exit(1)
+	if opts.Sign_type == 1 {
+		eui, err = getEui(opts.Euifile)
+		if err != nil {
+			fmt.Printf("ERROR getting EUI64: %s\n", err)
+			os.Exit(1)
+		}
+	} else {
+		eui = 0
 	}
 
 	sigfile := filepath.Join(opts.Sigdir, fmt.Sprintf("EUI-64_%016X.bin", eui))
@@ -334,7 +343,7 @@ func main() {
 	var sig UserSignature
 	timestamp := time.Now().UTC()
 
-	err = sig.Construct(timestamp, eui, opts.Boardname, opts.Version, opts.Board_uuid, opts.Manuf_uuid)
+	err = sig.Construct(timestamp, eui, opts.Boardname, opts.Version, opts.Board_uuid, opts.Manuf_uuid, opts.Sign_type)
 	if err != nil {
 		fmt.Printf("ERROR generating sigdata: %s\n", err)
 		os.Exit(1)
@@ -352,10 +361,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = markEui(opts.Euifile, sig)
-	if err != nil {
-		fmt.Printf("ERROR marking %016X in %s: %s\n", eui, opts.Euifile, err)
-		os.Exit(1)
+	if opts.Sign_type == 1 {
+		err = markEui(opts.Euifile, sig)
+		if err != nil {
+			fmt.Printf("ERROR marking %016X in %s: %s\n", eui, opts.Euifile, err)
+			os.Exit(1)
+		}
 	}
 
 	err = ioutil.WriteFile(opts.Output, sigdata, 0640)
