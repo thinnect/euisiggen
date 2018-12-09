@@ -30,7 +30,7 @@ type UserSignature struct {
 
 	signature_size uint16
 	signature_type uint8
-	eui64 uint64
+	eui64          uint64
 
 	year    uint16 // nx_uint16_t year;
 	month   uint8  // nx_uint8_t month;
@@ -47,7 +47,7 @@ type UserSignature struct {
 	pcb_version_minor    uint8 // nx_uint8_t pcb_version_minor;
 	pcb_version_assembly uint8 // nx_uint8_t pcb_version_assembly;
 
-	board_uuid [16]byte
+	board_uuid        [16]byte
 	manufacturer_uuid [16]byte
 
 	// crc uint16
@@ -185,7 +185,6 @@ func parseEui(s string) (uint64, error) {
 		return 0, errors.New(fmt.Sprintf("%s is not a valid EUI-64", s))
 	}
 
-
 	return eui, nil
 }
 
@@ -293,12 +292,13 @@ func main() {
 	var opts struct {
 		Boardname   string       `long:"boardname" required:"true" description:"The name of the PCB that the user signature will be used for."`
 		Version     BoardVersion `long:"version" required:"true" description:"The version of the board X.Y.Z."`
-		Board_uuid 	string 	 	 `long:"boarduuid" required:"true" description:"Board UUID. 16 bytes"`
-		Manuf_uuid 	string 		 `long:"manuuid" required:"true" description:"Manufacturer UUID. 16 bytes"`
+		Board_uuid  string       `long:"boarduuid" required:"true" description:"Board UUID. 16 bytes"`
+		Manuf_uuid  string       `long:"manuuid" required:"true" description:"Manufacturer UUID. 16 bytes"`
 		Output      string       `long:"out" default:"sigdata.bin" description:"The output file name."`
 		Sigdir      string       `long:"sigdir" default:"sigdata" description:"Where to store EUI_XXXXXXXXXXXXXXXX.bin files."`
 		Euifile     string       `long:"euifile" default:"eui.txt" description:"The file containing available EUIs."`
 		Sign_type   uint8        `long:"type" required:"true" description:"Signature type."`
+		Timestamp   int64        `long:"timestamp" required:"false" description:"Use the specified timestamp."`
 		ShowVersion func()       `short:"V" description:"Show generator version."`
 		Debug       bool         `long:"debug" description:"The file containing available EUIs."`
 	}
@@ -341,7 +341,12 @@ func main() {
 	}
 
 	var sig UserSignature
-	timestamp := time.Now().UTC()
+	var timestamp uint64
+	if opts.Timestamp > 0 {
+		timestamp = time.Unix(opts.Timestamp, 0).UTC()
+	} else {
+		timestamp = time.Now().UTC()
+	}
 
 	err = sig.Construct(timestamp, eui, opts.Boardname, opts.Version, opts.Board_uuid, opts.Manuf_uuid, opts.Sign_type)
 	if err != nil {
