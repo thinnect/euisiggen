@@ -24,102 +24,103 @@ var g_version_minor uint8 = 0
 var g_version_patch uint8 = 0
 
 type UserSignature struct {
-	version_major uint8
-	version_minor uint8
-	version_patch uint8
+}
+
+type EUISignature struct {
+	sig_version_major uint8
+	sig_version_minor uint8
+	sig_version_patch uint8
 
 	signature_size uint16
 	signature_type uint8
-	eui64          uint64
-
-	year    uint16 // nx_uint16_t year;
-	month   uint8  // nx_uint8_t month;
-	day     uint8  // nx_uint8_t day;
-	hours   uint8  // nx_uint8_t hours;
-	minutes uint8  // nx_uint8_t minutes;
-	seconds uint8  // nx_uint8_t seconds;
 
 	unix_time int64 // nx_int64_t unix_time; // Same moment in time
 
-	boardname [16]byte //char boardname[16]; // up to 16 chars or 0 terminated
+	eui64 uint64
 
-	pcb_version_major    uint8 // nx_uint8_t pcb_version_major;
-	pcb_version_minor    uint8 // nx_uint8_t pcb_version_minor;
-	pcb_version_assembly uint8 // nx_uint8_t pcb_version_assembly;
+	// crc uint16
+}
 
-	board_uuid        [16]byte
+type ComponentSignature struct {
+	sig_version_major uint8
+	sig_version_minor uint8
+	sig_version_patch uint8
+
+	signature_size uint16
+	signature_type uint8
+
+	unix_time int64 // nx_int64_t unix_time; // Same moment in time
+
+	name [16]byte //char boardname[16]; // up to 16 chars or 0 terminated
+
+	version_major    uint8 // nx_uint8_t pcb_version_major;
+	version_minor    uint8 // nx_uint8_t pcb_version_minor;
+	version_assembly uint8 // nx_uint8_t pcb_version_assembly;
+
+	component_uuid    [16]byte
 	manufacturer_uuid [16]byte
 
 	// crc uint16
 }
 
-func (self *UserSignature) Construct(t time.Time, eui64 uint64, boardname string, boardversion BoardVersion, boarduuid string, manufuuid string, signature_type uint8) error {
+func (self *UserSignature) ConstructEUISignature(t time.Time, eui64 uint64) (*EUISignature, error) {
+	sig := new(EUISignature)
+	sig.sig_version_major = g_version_major
+	sig.sig_version_minor = g_version_minor
+	sig.sig_version_patch = g_version_patch
+
+	sig.signature_size = uint16(binary.Size(sig)) + 2
+	sig.signature_type = 0
+	sig.eui64 = eui64
+
+	sig.unix_time = t.Unix()
+
+	return sig, nil
+}
+
+func (self *UserSignature) ConstructComponentSignature(t time.Time, boardname string, boardversion BoardVersion, boarduuid string, manufuuid string, signature_type uint8) (*ComponentSignature, error) {
 	var err error
-	self.version_major = g_version_major
-	self.version_minor = g_version_minor
-	self.version_patch = g_version_patch
+	sig := new(ComponentSignature)
+	sig.sig_version_major = g_version_major
+	sig.sig_version_minor = g_version_minor
+	sig.sig_version_patch = g_version_patch
 
-	self.signature_size = uint16(binary.Size(self)) + 2
-	self.signature_type = signature_type
-	self.eui64 = eui64
+	sig.signature_size = uint16(binary.Size(sig)) + 2
+	sig.signature_type = signature_type
 
-	// datetime
-	self.year = uint16(t.Year())
-	self.month = uint8(t.Month())
-	self.day = uint8(t.Day())
-	self.hours = uint8(t.Hour())
-	self.minutes = uint8(t.Minute())
-	self.seconds = uint8(t.Second())
-
-	self.unix_time = t.Unix()
+	sig.unix_time = t.Unix()
 
 	if len(boardname) == 0 {
-		return errors.New(fmt.Sprintf("Boardname is too short(%d)", len(boardname)))
+		return nil, errors.New(fmt.Sprintf("Boardname is too short(%d)", len(boardname)))
 	}
 
-	if len(boardname) > len(self.boardname) {
-		return errors.New(fmt.Sprintf("Boardname is too long(%d), maximum allowed length is %d", len(boardname), len(self.boardname)))
+	if len(boardname) > len(sig.name) {
+		return nil, errors.New(fmt.Sprintf("Boardname is too long(%d), maximum allowed length is %d", len(boardname), len(sig.name)))
 	}
-	copy(self.boardname[:], boardname)
+	copy(sig.name[:], boardname)
 
-	self.pcb_version_major = boardversion.major
-	self.pcb_version_minor = boardversion.minor
-	self.pcb_version_assembly = boardversion.assembly
+	sig.version_major = boardversion.major
+	sig.version_minor = boardversion.minor
+	sig.version_assembly = boardversion.assembly
 
-	self.board_uuid, err = uuid.FromString(boarduuid)
+	sig.component_uuid, err = uuid.FromString(boarduuid)
 	if err != nil {
-		return errors.New(fmt.Sprintf("Board UUID error(%d)", err))
+		return nil, errors.New(fmt.Sprintf("Board UUID error(%d)", err))
 	}
 
-	self.manufacturer_uuid, err = uuid.FromString(manufuuid)
+	sig.manufacturer_uuid, err = uuid.FromString(manufuuid)
 	if err != nil {
-		return errors.New(fmt.Sprintf("Manufacturer UUID error(%d)", err))
+		return nil, errors.New(fmt.Sprintf("Manufacturer UUID error(%d)", err))
 	}
 
-	return nil
+	return sig, nil
 }
 
-func (self *UserSignature) BoardName() string {
-	n := bytes.Index(self.boardname[:], []byte{0})
-	if n < 0 {
-		n = 16
-	}
-	return string(self.boardname[:n])
-}
-
-func (self *UserSignature) BoardVersion() string {
-	return fmt.Sprintf("%d.%d.%d", self.pcb_version_major, self.pcb_version_minor, self.pcb_version_assembly)
-}
-
-func (self *UserSignature) TimestampString() string {
-	return fmt.Sprintf("%04d-%02d-%02d %02d:%02d:%02d", self.year, self.month, self.day, self.hours, self.minutes, self.seconds)
-}
-
-func (self *UserSignature) Serialize() ([]byte, error) {
+func (self *UserSignature) Serialize(sig interface{}) ([]byte, error) {
 	var err error
 	buf := new(bytes.Buffer)
 
-	err = binary.Write(buf, binary.BigEndian, self)
+	err = binary.Write(buf, binary.BigEndian, sig)
 	if err != nil {
 		return nil, err
 	}
@@ -133,6 +134,22 @@ func (self *UserSignature) Serialize() ([]byte, error) {
 	}
 
 	return buf.Bytes(), nil
+}
+
+func (self *ComponentSignature) BoardName() string {
+	n := bytes.Index(self.name[:], []byte{0})
+	if n < 0 {
+		n = 16
+	}
+	return string(self.name[:n])
+}
+
+func (self *ComponentSignature) BoardVersion() string {
+	return fmt.Sprintf("%d.%d.%d", self.version_major, self.version_minor, self.version_assembly)
+}
+
+func (self *ComponentSignature) TimestampString() string {
+	return "" //fmt.Sprintf("%04d-%02d-%02d %02d:%02d:%02d", self.year, self.month, self.day, self.hours, self.minutes, self.seconds)
 }
 
 type BoardVersion struct {
@@ -212,7 +229,7 @@ func getEui(infile string) (uint64, error) {
 	return 0, errors.New(fmt.Sprintf("Could not find a suitable EUI64 in %s!", infile))
 }
 
-func markEui(infile string, sig UserSignature) error {
+func markEui(infile string, esig EUISignature, csig ComponentSignature) error {
 	infile, err := filepath.Abs(infile)
 	if err != nil {
 		return err
@@ -224,7 +241,7 @@ func markEui(infile string, sig UserSignature) error {
 	}
 	defer in.Close()
 
-	outfile := filepath.Join(filepath.Dir(infile), fmt.Sprintf("eui_temp_%d.txt", sig.unix_time))
+	outfile := filepath.Join(filepath.Dir(infile), fmt.Sprintf("eui_temp_%d.txt", esig.unix_time))
 	out, err := os.OpenFile(outfile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0660)
 	if err != nil {
 		return err
@@ -250,12 +267,12 @@ func markEui(infile string, sig UserSignature) error {
 					return err
 				}
 
-				if val == sig.eui64 {
-					m := fmt.Sprintf("%s,%s,%d,%x,%x", sig.BoardName(), sig.BoardVersion(), sig.unix_time, sig.board_uuid, sig.manufacturer_uuid)
+				if val == esig.eui64 {
+					m := fmt.Sprintf("%s,%s,%d,%x,%x", csig.BoardName(), csig.BoardVersion(), csig.unix_time, csig.component_uuid, csig.manufacturer_uuid)
 					writer.WriteString(fmt.Sprintf("%s,%s", splits[0], m))
 					marked = true
 				} else if !marked {
-					fmt.Printf("Found unmarked %016X != %016X", val, sig.eui64)
+					fmt.Printf("Found unmarked %016X != %016X", val, esig.eui64)
 				}
 			} else {
 				writer.WriteString(t)
@@ -324,7 +341,7 @@ func main() {
 		}
 	}
 
-	if opts.Sign_type == 1 {
+	if opts.Sign_type == 0 {
 		eui, err = getEui(opts.Euifile)
 		if err != nil {
 			fmt.Printf("ERROR getting EUI64: %s\n", err)
@@ -340,25 +357,41 @@ func main() {
 		os.Exit(1)
 	}
 
-	var sig UserSignature
-	var timestamp uint64
+	var gen UserSignature
+	var timestamp time.Time
 	if opts.Timestamp > 0 {
 		timestamp = time.Unix(opts.Timestamp, 0).UTC()
 	} else {
 		timestamp = time.Now().UTC()
 	}
 
-	err = sig.Construct(timestamp, eui, opts.Boardname, opts.Version, opts.Board_uuid, opts.Manuf_uuid, opts.Sign_type)
+	var esig *EUISignature
+	esig, err = gen.ConstructEUISignature(timestamp, eui)
 	if err != nil {
 		fmt.Printf("ERROR generating sigdata: %s\n", err)
 		os.Exit(1)
 	}
 
-	sigdata, err := sig.Serialize()
+	var csig *ComponentSignature
+	csig, err = gen.ConstructComponentSignature(timestamp, opts.Boardname, opts.Version, opts.Board_uuid, opts.Manuf_uuid, 1)
 	if err != nil {
 		fmt.Printf("ERROR generating sigdata: %s\n", err)
 		os.Exit(1)
 	}
+
+	esigdata, err := gen.Serialize(esig)
+	if err != nil {
+		fmt.Printf("ERROR generating sigdata: %s\n", err)
+		os.Exit(1)
+	}
+
+	csigdata, err := gen.Serialize(csig)
+	if err != nil {
+		fmt.Printf("ERROR generating sigdata: %s\n", err)
+		os.Exit(1)
+	}
+
+	sigdata := append(esigdata, csigdata...)
 
 	err = ioutil.WriteFile(sigfile, sigdata, 0440)
 	if err != nil {
@@ -366,8 +399,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	if opts.Sign_type == 1 {
-		err = markEui(opts.Euifile, sig)
+	if opts.Sign_type == 0 {
+		err = markEui(opts.Euifile, *esig, *csig)
 		if err != nil {
 			fmt.Printf("ERROR marking %016X in %s: %s\n", eui, opts.Euifile, err)
 			os.Exit(1)
@@ -380,10 +413,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("EUI-64: %016X\n", sig.eui64)
+	fmt.Printf("EUI-64: %016X\n", esig.eui64)
 	if opts.Debug {
 		printGeneratorVersion()
-		fmt.Printf("Timestamp: %d (%s)\n", sig.unix_time, sig.TimestampString())
+		fmt.Printf("Timestamp: %d (%s)\n", esig.unix_time, "")
+		//esig.TimestampString())
 		fmt.Printf("Boardname: %s\n", opts.Boardname)
 		fmt.Printf("Version:   %s\n", opts.Version)
 		fmt.Printf("Output:    %s\n", opts.Output)
