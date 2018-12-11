@@ -67,7 +67,9 @@ type ComponentSignature struct {
 
 	manufacturer_uuid [16]byte
 
-	data_length uint16
+	position uint8 // Position / index of the component (when multiple)
+
+	data_length uint16 // Length of the component specific data
 	// data     []byte  // compoent specific data - calibration etc
 
 	// crc uint16
@@ -90,7 +92,7 @@ func (self *UserSignature) ConstructEUISignature(t time.Time, eui64 uint64) (*EU
 
 func (self *UserSignature) ConstructComponentSignature(t time.Time, boardname string,
 	boardversion BoardVersion, uuid [16]byte, manufuuid [16]byte,
-	serial [16]byte,
+	serial [16]byte, component_position uint8,
 	signature_type uint8) (*ComponentSignature, error) {
 
 	sig := new(ComponentSignature)
@@ -121,6 +123,8 @@ func (self *UserSignature) ConstructComponentSignature(t time.Time, boardname st
 	sig.serial_number = serial
 
 	sig.manufacturer_uuid = manufuuid
+
+	sig.position = component_position
 
 	return sig, nil
 }
@@ -318,10 +322,11 @@ func main() {
 	var opts struct {
 		Type string `long:"type" required:"true" description:"Signature type - board, platform, component"`
 
-		Name         string       `long:"name"         required:"true" description:"The name of the component that the user signature will be used for."`
-		Version      BoardVersion `long:"version"      required:"true" description:"The version of the board X.Y.Z."`
-		UUID         string       `long:"uuid"         required:"true" description:"Board/Platform/Component UUID. 16 bytes."`
-		Manufacturer string       `long:"manufacturer" required:"true" description:"Manufacturer UUID. 16 bytes."`
+		Name         string       `long:"name"         required:"true"  description:"The name of the component that the user signature will be used for."`
+		Version      BoardVersion `long:"version"      required:"true"  description:"The version of the board X.Y.Z."`
+		UUID         string       `long:"uuid"         required:"true"  description:"Board/Platform/Component UUID. 16 bytes."`
+		Manufacturer string       `long:"manufacturer" required:"true"  description:"Manufacturer UUID. 16 bytes."`
+		Position     uint8        `long:"position"     required:"false" description:"Component position/index (when multiple)."`
 
 		Serial     string `long:"serial"     required:"false" description:"Serial number, string format. Up to 16 characters."`
 		SerialUUID string `long:"serialuuid" required:"false" description:"Serial number, UUID format. 16 bytes."`
@@ -436,7 +441,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		csig, err := gen.ConstructComponentSignature(timestamp, opts.Name, opts.Version, component_uuid, manufacturer_uuid, serial, SIGNATURE_TYPE_BOARD)
+		csig, err := gen.ConstructComponentSignature(timestamp, opts.Name, opts.Version, component_uuid, manufacturer_uuid, serial, opts.Position, SIGNATURE_TYPE_BOARD)
 		if err != nil {
 			fmt.Printf("ERROR generating sigdata: %s\n", err)
 			os.Exit(1)
@@ -501,7 +506,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		csig, err := gen.ConstructComponentSignature(timestamp, opts.Name, opts.Version, component_uuid, manufacturer_uuid, serial, tp)
+		csig, err := gen.ConstructComponentSignature(timestamp, opts.Name, opts.Version, component_uuid, manufacturer_uuid, serial, opts.Position, tp)
 		if err != nil {
 			fmt.Printf("ERROR generating sigdata: %s\n", err)
 			os.Exit(1)
