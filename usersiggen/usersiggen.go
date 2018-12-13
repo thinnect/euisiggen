@@ -402,8 +402,9 @@ func main() {
 		}
 		copy(serial[:], opts.Serial)
 	} else {
-		fmt.Printf("ERRPR: No serial number.")
-		os.Exit(1)
+		if opts.Debug {
+			fmt.Printf("WARNING: No serial number.")
+		}
 	}
 
 	if opts.Type == "board" {
@@ -486,7 +487,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		if err := ioutil.WriteFile(opts.Output, sigdata, 0440); err != nil {
+		if err := ioutil.WriteFile(opts.Output, sigdata, 0640); err != nil {
 			fmt.Printf("ERROR writing output file: %s\n", err)
 			os.Exit(1)
 		}
@@ -518,7 +519,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		f, err := os.OpenFile(opts.Output, os.O_APPEND|os.O_WRONLY, 0440)
+		f, err := os.OpenFile(opts.Output, os.O_APPEND|os.O_WRONLY, 0640)
 		if err != nil {
 			fmt.Printf("ERROR opening output file: %s\n", err)
 			os.Exit(1)
