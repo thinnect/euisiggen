@@ -405,8 +405,7 @@ func main() {
 
 		Output string `long:"out" default:"sigdata.bin" description:"The output file name."`
 
-		ReadEUI    bool   `long:"read-eui" description:"Read the EUI64 from input signature file given with [sigfilein]"`
-		SigFileIn  string `long:"sigfilein" description:"The input signature file name."`
+		ReadSig    string   `short:"r" long:"read-sig" description:"Dump signature in file as JSON"`
 
 		ShowVersion func() `short:"V" description:"Show generator version."`
 		Debug       bool   `long:"debug" description:"Enable debug messages"`
@@ -429,29 +428,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	if opts.ReadEUI {
-		// We are reading an EUI. Verify mandatory options for this operation
-		required_opts := []string{"sigfilein"}
-		for _, long_opt_name := range required_opts {
-			opt := parser.FindOptionByLongName(long_opt_name)
-			if !opt.IsSet() {
-				fmt.Printf("Required flag `--%s' was not specified\n", long_opt_name)
-				os.Exit(2)
-			}
-		}
-
+	opt := parser.FindOptionByLongName("read-sig")
+	if opt.IsSet() {
+		// We are reading a signature.
 		var eui_sig EUISignature
-		eui_sig, err = readEuiSigFromFile(opts.SigFileIn)
+		eui_sig, err = readEuiSigFromFile(opts.ReadSig)
 		if err != nil {
-			fmt.Printf("Failed to read signature from file %s\n", opts.SigFileIn)
+			fmt.Printf("Failed to read signature from file %s\n", opts.ReadSig)
 			os.Exit(3)
 		} else {
-			fmt.Printf(euiSigToJson(eui_sig))
+			fmt.Println(euiSigToJson(eui_sig))
 			os.Exit(0)
 		}
 	}
 
-	// We are generating an EUI. Verify mandatory options for this operation
+	// We are generating a signature. Verify mandatory options for this operation
 	required_opts := []string{"type", "name", "version", "uuid", "manufacturer", "position"}
 	for _, long_opt_name := range required_opts {
 		opt := parser.FindOptionByLongName(long_opt_name)
