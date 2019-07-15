@@ -10,6 +10,7 @@ import "strings"
 import "strconv"
 import "errors"
 import "encoding/binary"
+import "encoding/json"
 import "bytes"
 import "time"
 import "bufio"
@@ -31,51 +32,73 @@ const SIGNATURE_TYPE_COMPONENT = 3 // Components list individual parts of a plat
 type UserSignature struct {
 }
 
+type eui64 uint64
+
+func (m eui64) MarshalJSON() ([]byte, error) {
+	return json.Marshal(fmt.Sprintf("%016X", m))
+}
+
+type tuuid [16]byte
+
+func (u tuuid) MarshalJSON() ([]byte, error) {
+	uu, _ := uuid.FromBytes(u[:])
+	return json.Marshal(fmt.Sprintf("%s", uu))
+}
+
+type tname [16]byte
+
+func (n tname) MarshalJSON() ([]byte, error) {
+	l := len(n)
+	for i := 0; i < l; i++ {
+		if n[i] == 0 {
+			l = i
+		}
+	}
+	return json.Marshal(fmt.Sprintf("%s", n[:l]))
+}
+
+type BaseSignature struct {
+	Sig_version_major uint8 `json:"sig_version_major"`
+	Sig_version_minor uint8 `json:"sig_version_minor"`
+	Sig_version_patch uint8 `json:"sig_version_patch"`
+
+	Signature_size uint16 `json:"signature_size"`
+	Signature_type uint8  `json:"signature_type"`
+
+	Unix_time int64 `json:"unix_time"` // Signature generation time
+}
+
 type EUISignature struct {
-	Sig_version_major uint8
-	Sig_version_minor uint8
-	Sig_version_patch uint8
+	BaseSignature
 
-	Signature_size uint16
-	Signature_type uint8
-
-	Unix_time int64 // Signature generation time
-
-	Eui64 uint64 // EUI-64, byte array
+	Eui64 eui64 `json:"eui64"` // EUI-64, byte array
 
 	// crc uint16
 }
 
 type ComponentSignature struct {
-	Sig_version_major uint8
-	Sig_version_minor uint8
-	Sig_version_patch uint8
+	BaseSignature
 
-	Signature_size uint16
-	Signature_type uint8
+	Component_uuid tuuid `json:"component_uuid"`
+	Name           tname `json:"component_name"` //char boardname[16]; // up to 16 chars or 0 terminated
 
-	Unix_time int64 // Signature generation time
+	Version_major    uint8 `json:"pcb_version_major"`    // nx_uint8_t pcb_version_major;
+	Version_minor    uint8 `json:"pcb_version_minor"`    // nx_uint8_t pcb_version_minor;
+	Version_assembly uint8 `json:"pcb_version_assembly"` // nx_uint8_t pcb_version_assembly;
 
-	component_uuid [16]byte
-	name           [16]byte //char boardname[16]; // up to 16 chars or 0 terminated
+	Serial_number tuuid `json:"serial_number"` // Possibly an UUID, but could be a \0 terminated string
 
-	version_major    uint8 // nx_uint8_t pcb_version_major;
-	version_minor    uint8 // nx_uint8_t pcb_version_minor;
-	version_assembly uint8 // nx_uint8_t pcb_version_assembly;
+	Manufacturer_uuid tuuid `json:"manufacturer"`
 
-	serial_number [16]byte // Possibly an UUID, but could be a \0 terminated string
+	Position uint8 `json:"position"` // Position / index of the component (when multiple)
 
-	manufacturer_uuid [16]byte
-
-	position uint8 // Position / index of the component (when multiple)
-
-	data_length uint16 // Length of the component specific data
+	Data_length uint16 `json:"data_length"` // Length of the component specific data
 	// data     []byte  // compoent specific data - calibration etc
 
 	// crc uint16
 }
 
-func (self *UserSignature) ConstructEUISignature(t time.Time, eui64 uint64) (*EUISignature, error) {
+func (self *UserSignature) ConstructEUISignature(t time.Time, eui eui64) (*EUISignature, error) {
 	sig := new(EUISignature)
 	sig.Sig_version_major = g_version_major
 	sig.Sig_version_minor = g_version_minor
@@ -83,7 +106,7 @@ func (self *UserSignature) ConstructEUISignature(t time.Time, eui64 uint64) (*EU
 
 	sig.Signature_size = uint16(binary.Size(sig)) + 2
 	sig.Signature_type = SIGNATURE_TYPE_EUI64
-	sig.Eui64 = eui64
+	sig.Eui64 = eui
 
 	sig.Unix_time = t.Unix()
 
@@ -109,22 +132,22 @@ func (self *UserSignature) ConstructComponentSignature(t time.Time, boardname st
 		return nil, errors.New(fmt.Sprintf("Boardname is too short(%d)", len(boardname)))
 	}
 
-	if len(boardname) > len(sig.name) {
-		return nil, errors.New(fmt.Sprintf("Boardname is too long(%d), maximum allowed length is %d", len(boardname), len(sig.name)))
+	if len(boardname) > len(sig.Name) {
+		return nil, errors.New(fmt.Sprintf("Boardname is too long(%d), maximum allowed length is %d", len(boardname), len(sig.Name)))
 	}
-	copy(sig.name[:], boardname)
+	copy(sig.Name[:], boardname)
 
-	sig.version_major = boardversion.major
-	sig.version_minor = boardversion.minor
-	sig.version_assembly = boardversion.assembly
+	sig.Version_major = boardversion.major
+	sig.Version_minor = boardversion.minor
+	sig.Version_assembly = boardversion.assembly
 
-	sig.component_uuid = uuid
+	sig.Component_uuid = uuid
 
-	sig.serial_number = serial
+	sig.Serial_number = serial
 
-	sig.manufacturer_uuid = manufuuid
+	sig.Manufacturer_uuid = manufuuid
 
-	sig.position = component_position
+	sig.Position = component_position
 
 	return sig, nil
 }
@@ -149,11 +172,11 @@ func (self *UserSignature) Serialize(sig interface{}) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (self *UserSignature) DeserializeEui(eui_bytes []byte, crc_bytes []byte) (EUISignature, error) {
+func (self *UserSignature) DeserializeEui(eui_bytes []byte) (EUISignature, error) {
 	var ret EUISignature
-	//b := []byte{0x03, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x5d, 0x07, 0x3b, 0x12, 0x70, 0xb3, 0xd5, 0xe3, 0x90, 0x00, 0x30, 0x07}
-	eui_stream := bytes.NewReader(eui_bytes)
-	crc_stream := bytes.NewReader(crc_bytes)
+	sz := binary.Size(EUISignature{})
+	eui_stream := bytes.NewReader(eui_bytes[:sz])
+	crc_stream := bytes.NewReader(eui_bytes[sz : sz+2])
 
 	err := binary.Read(eui_stream, binary.BigEndian, &ret)
 	if err != nil {
@@ -166,7 +189,7 @@ func (self *UserSignature) DeserializeEui(eui_bytes []byte, crc_bytes []byte) (E
 		return ret, fmt.Errorf("Failed to read CRC from raw: %s\n", err)
 	}
 
-	computed_crc := crc16.Crc16(eui_bytes)
+	computed_crc := crc16.Crc16(eui_bytes[:sz])
 	if stored_crc == computed_crc {
 		return ret, nil
 	} else {
@@ -174,16 +197,52 @@ func (self *UserSignature) DeserializeEui(eui_bytes []byte, crc_bytes []byte) (E
 	}
 }
 
+func (self *UserSignature) DeserializeComponent(comp_bytes []byte) (ComponentSignature, error) {
+	var ret ComponentSignature
+	sz := binary.Size(ComponentSignature{})
+	comp_stream := bytes.NewReader(comp_bytes[:sz])
+	crc_stream := bytes.NewReader(comp_bytes[sz : sz+2])
+
+	err := binary.Read(comp_stream, binary.BigEndian, &ret)
+	if err != nil {
+		return ret, fmt.Errorf("Failed to read Component Signature from raw: %s\n", err)
+	}
+
+	var stored_crc uint16
+	err = binary.Read(crc_stream, binary.BigEndian, &stored_crc)
+	if err != nil {
+		return ret, fmt.Errorf("Failed to read CRC from raw: %s\n", err)
+	}
+
+	computed_crc := crc16.Crc16(comp_bytes[:sz])
+	if stored_crc == computed_crc {
+		return ret, nil
+	} else {
+		return ret, fmt.Errorf("stored CRC: %04X computed CRC: %04X\n", stored_crc, computed_crc)
+	}
+}
+
+func (self *UserSignature) DeserializeBaseSignature(sig_bytes []byte) (BaseSignature, error) {
+	var ret BaseSignature
+	sig_stream := bytes.NewReader(sig_bytes[:binary.Size(BaseSignature{})])
+
+	err := binary.Read(sig_stream, binary.BigEndian, &ret)
+	if err != nil {
+		return ret, fmt.Errorf("Failed to read Component Signature from raw: %s\n", err)
+	}
+	return ret, nil
+}
+
 func (self *ComponentSignature) BoardName() string {
-	n := bytes.Index(self.name[:], []byte{0})
+	n := bytes.Index(self.Name[:], []byte{0})
 	if n < 0 {
 		n = 16
 	}
-	return string(self.name[:n])
+	return string(self.Name[:n])
 }
 
 func (self *ComponentSignature) BoardVersion() string {
-	return fmt.Sprintf("%d.%d.%d", self.version_major, self.version_minor, self.version_assembly)
+	return fmt.Sprintf("%d.%d.%d", self.Version_major, self.Version_minor, self.Version_assembly)
 }
 
 func TimestampString(t time.Time) string {
@@ -230,7 +289,7 @@ func (v BoardVersion) MarshalFlag() (string, error) {
 	return fmt.Sprintf("%s", v), nil
 }
 
-func parseEui(s string) (uint64, error) {
+func parseEui(s string) (eui64, error) {
 	if len(s) != 16 {
 		return 0, errors.New(fmt.Sprintf("%s is not a valid EUI-64", s))
 	}
@@ -240,10 +299,10 @@ func parseEui(s string) (uint64, error) {
 		return 0, errors.New(fmt.Sprintf("%s is not a valid EUI-64", s))
 	}
 
-	return eui, nil
+	return eui64(eui), nil
 }
 
-func getEui(infile string) (uint64, error) {
+func getEui(infile string) (eui64, error) {
 	in, err := os.Open(infile)
 	if err != nil {
 		return 0, err
@@ -306,7 +365,7 @@ func markEui(infile string, esig EUISignature, csig ComponentSignature) error {
 				}
 
 				if val == esig.Eui64 {
-					m := fmt.Sprintf("%s,%s,%d,%x,%x", csig.BoardName(), csig.BoardVersion(), csig.Unix_time, csig.component_uuid, csig.manufacturer_uuid)
+					m := fmt.Sprintf("%s,%s,%d,%x,%x", csig.BoardName(), csig.BoardVersion(), csig.Unix_time, csig.Component_uuid, csig.Manufacturer_uuid)
 					writer.WriteString(fmt.Sprintf("%s,%s", splits[0], m))
 					marked = true
 				} else if !marked {
@@ -339,45 +398,59 @@ func markEui(infile string, esig EUISignature, csig ComponentSignature) error {
 	return nil
 }
 
-func readEuiSigFromFile(filename string) (EUISignature, error) {
+func readSigsFromFile(filename string) ([]interface{}, error) {
+	var sigs []interface{}
 	var sig UserSignature
-	var eui_sig EUISignature
+	var bsig BaseSignature
 	var sigdata_in []byte
 	var err error
-	var sig_len int = binary.Size(EUISignature{})
 	sigdata_in, err = ioutil.ReadFile(filename)
 	if err != nil {
-		return eui_sig, err
+		return sigs, err
 	}
-	eui_sig, err = sig.DeserializeEui(sigdata_in[0:sig_len], sigdata_in[sig_len:sig_len + 2])
-	if err != nil {
-		return eui_sig, err
+
+	for rd := uint16(0); rd < uint16(len(sigdata_in)); rd += bsig.Signature_size {
+		bsig, err = sig.DeserializeBaseSignature(sigdata_in[rd:])
+		if err != nil {
+			return sigs, err
+		}
+
+		// fmt.Printf("sig @ %d + %d\n", rd, bsig.Signature_size)
+		if bsig.Signature_type == SIGNATURE_TYPE_EUI64 {
+			eui_sig, err := sig.DeserializeEui(sigdata_in[rd:])
+			if err != nil {
+				return sigs, err
+			}
+			sigs = append(sigs, eui_sig)
+		} else {
+			comp_sig, err := sig.DeserializeComponent(sigdata_in[rd:])
+			if err != nil {
+				return sigs, err
+			}
+			sigs = append(sigs, comp_sig)
+		}
 	}
-	return eui_sig, nil
+
+	return sigs, nil
 }
 
-func euiSigToJson(eui_sig EUISignature) (string) {
-	var fmt_str string =
-`{
-	"eui_signature": {
-		"sig_version_major": %d,
-		"sig_version_minor": %d,
-		"sig_version_patch": %d,
-		"signature_size": %d,
-		"signature_type": %d,
-		"unix_time": %d,
-		"eui64": "%016X"
+func sigsToJson(sigs []interface{}) string {
+	sigmap := map[string]interface{}{"eui_signature": nil, "component_signatures": make([]interface{}, 0)}
+	for _, sig := range sigs {
+		switch s := sig.(type) {
+		case EUISignature:
+			sigmap["eui_signature"] = s
+		case ComponentSignature:
+			if lst, ok := sigmap["component_signatures"].([]interface{}); ok {
+				sigmap["component_signatures"] = append(lst, s)
+			}
+		default:
+			fmt.Printf("tp default")
+		}
 	}
-}`
 
-	return fmt.Sprintf(fmt_str,
-		eui_sig.Sig_version_major,
-		eui_sig.Sig_version_minor,
-		eui_sig.Sig_version_patch,
-		eui_sig.Signature_size,
-		eui_sig.Signature_type,
-		eui_sig.Unix_time,
-		eui_sig.Eui64)
+	j, _ := json.MarshalIndent(sigmap, "", "	")
+	return string(j)
 }
 
 func printGeneratorVersion() {
@@ -386,7 +459,7 @@ func printGeneratorVersion() {
 
 func main() {
 	var opts struct {
-		Type         string       `long:"type" description:"Signature type - board, platform, component"`
+		Type string `long:"type" description:"Signature type - board, platform, component"`
 
 		Name         string       `long:"name"         description:"The name of the component that the user signature will be used for."`
 		Version      BoardVersion `long:"version"      description:"The version of the board X.Y.Z."`
@@ -405,14 +478,14 @@ func main() {
 
 		Output string `long:"out" default:"sigdata.bin" description:"The output file name."`
 
-		ReadSig    string   `short:"r" long:"read-sig" description:"Dump signature in file as JSON"`
+		ReadSig string `short:"r" long:"read-sig" description:"Dump signature in file as JSON"`
 
 		ShowVersion func() `short:"V" description:"Show generator version."`
 		Debug       bool   `long:"debug" description:"Enable debug messages"`
 	}
 
 	var gen UserSignature
-	var eui uint64
+	var eui eui64
 	var err error
 	var sigdata []byte
 
@@ -431,13 +504,12 @@ func main() {
 	opt := parser.FindOptionByLongName("read-sig")
 	if opt.IsSet() {
 		// We are reading a signature.
-		var eui_sig EUISignature
-		eui_sig, err = readEuiSigFromFile(opts.ReadSig)
+		sigs, err := readSigsFromFile(opts.ReadSig)
 		if err != nil {
 			fmt.Printf("Failed to read signature from file %s\n", opts.ReadSig)
 			os.Exit(3)
 		} else {
-			fmt.Println(euiSigToJson(eui_sig))
+			fmt.Println(sigsToJson(sigs))
 			os.Exit(0)
 		}
 	}
