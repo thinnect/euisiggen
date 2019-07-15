@@ -154,10 +154,8 @@ func (self *UserSignature) DeserializeEui(eui_bytes []byte, crc_bytes []byte) (E
 	//b := []byte{0x03, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x5d, 0x07, 0x3b, 0x12, 0x70, 0xb3, 0xd5, 0xe3, 0x90, 0x00, 0x30, 0x07}
 	eui_stream := bytes.NewReader(eui_bytes)
 	crc_stream := bytes.NewReader(crc_bytes)
-	var t uint8
 
 	err := binary.Read(eui_stream, binary.BigEndian, &ret)
-	ret.Sig_version_major = t
 	if err != nil {
 		return ret, fmt.Errorf("Failed to read EUISignature from raw: %s\n", err)
 	}
@@ -341,22 +339,45 @@ func markEui(infile string, esig EUISignature, csig ComponentSignature) error {
 	return nil
 }
 
-func readEuiFromSig(filename string) (uint64, error) {
+func readEuiSigFromFile(filename string) (EUISignature, error) {
 	var sig UserSignature
-	var eui_in EUISignature
+	var eui_sig EUISignature
 	var sigdata_in []byte
 	var err error
+	var sig_len int = binary.Size(EUISignature{})
 	sigdata_in, err = ioutil.ReadFile(filename)
 	if err != nil {
-		return 0, err
+		return eui_sig, err
 	}
-	eui_in, err = sig.DeserializeEui(sigdata_in[0:binary.Size(EUISignature{})], sigdata_in[binary.Size(EUISignature{}):binary.Size(EUISignature{}) + 2])
+	eui_sig, err = sig.DeserializeEui(sigdata_in[0:sig_len], sigdata_in[sig_len:sig_len + 2])
 	if err != nil {
-		return 0, err
+		return eui_sig, err
 	}
-	// fmt.Printf("Decoded EUISignature: %+v\n", eui_in)
-	// fmt.Printf("EUI64: %016X\n", eui_in.Eui64)
-	return eui_in.Eui64, nil
+	return eui_sig, nil
+}
+
+func euiSigToJson(eui_sig EUISignature) (string) {
+	var fmt_str string =
+`{
+	"eui_signature": {
+		"sig_version_major": %d,
+		"sig_version_minor": %d,
+		"sig_version_patch": %d,
+		"signature_size": %d,
+		"signature_type": %d,
+		"unix_time": %d,
+		"eui64": "%016X"
+	}
+}`
+
+	return fmt.Sprintf(fmt_str,
+		eui_sig.Sig_version_major,
+		eui_sig.Sig_version_minor,
+		eui_sig.Sig_version_patch,
+		eui_sig.Signature_size,
+		eui_sig.Signature_type,
+		eui_sig.Unix_time,
+		eui_sig.Eui64)
 }
 
 func printGeneratorVersion() {
@@ -419,15 +440,13 @@ func main() {
 			}
 		}
 
-		if opts.Debug {
-			fmt.Printf("Reading signature from file %s\n", opts.SigFileIn)
-		}
-		eui, err = readEuiFromSig(opts.SigFileIn)
+		var eui_sig EUISignature
+		eui_sig, err = readEuiSigFromFile(opts.SigFileIn)
 		if err != nil {
 			fmt.Printf("Failed to read signature from file %s\n", opts.SigFileIn)
 			os.Exit(3)
 		} else {
-			fmt.Printf("%016X\n", eui)
+			fmt.Printf(euiSigToJson(eui_sig))
 			os.Exit(0)
 		}
 	}
