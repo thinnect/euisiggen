@@ -443,7 +443,7 @@ func main() {
 	}
 
 	// We are generating a signature. Verify mandatory options for this operation
-	required_opts := []string{"type", "name", "version", "uuid", "manufacturer", "position"}
+	required_opts := []string{"type", "name", "version", "uuid", "manufacturer"}
 	for _, long_opt_name := range required_opts {
 		opt := parser.FindOptionByLongName(long_opt_name)
 		if !opt.IsSet() {
