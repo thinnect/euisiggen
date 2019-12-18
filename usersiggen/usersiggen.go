@@ -29,6 +29,8 @@ const SIGNATURE_TYPE_BOARD = 1     // Boards are the core of the system - MCU
 const SIGNATURE_TYPE_PLATFORM = 2  // Platforms define the set of components
 const SIGNATURE_TYPE_COMPONENT = 3 // Components list individual parts of a platform
 
+const MAX_SIGNATURE_LENGTH = 1024  // Sanity checking signature lengths
+
 type UserSignature struct {
 }
 
@@ -180,20 +182,20 @@ func (self *UserSignature) DeserializeEui(eui_bytes []byte) (EUISignature, error
 
 	err := binary.Read(eui_stream, binary.BigEndian, &ret)
 	if err != nil {
-		return ret, fmt.Errorf("Failed to read EUISignature from raw: %s\n", err)
+		return ret, fmt.Errorf("Failed to read EUISignature from raw: %s", err)
 	}
 
 	var stored_crc uint16
 	err = binary.Read(crc_stream, binary.BigEndian, &stored_crc)
 	if err != nil {
-		return ret, fmt.Errorf("Failed to read CRC from raw: %s\n", err)
+		return ret, fmt.Errorf("Failed to read CRC from raw: %s", err)
 	}
 
 	computed_crc := crc16.Crc16(eui_bytes[:sz])
 	if stored_crc == computed_crc {
 		return ret, nil
 	} else {
-		return ret, fmt.Errorf("stored CRC: %04X computed CRC: %04X\n", stored_crc, computed_crc)
+		return ret, fmt.Errorf("stored CRC: %04X computed CRC: %04X", stored_crc, computed_crc)
 	}
 }
 
@@ -205,20 +207,20 @@ func (self *UserSignature) DeserializeComponent(comp_bytes []byte) (ComponentSig
 
 	err := binary.Read(comp_stream, binary.BigEndian, &ret)
 	if err != nil {
-		return ret, fmt.Errorf("Failed to read Component Signature from raw: %s\n", err)
+		return ret, fmt.Errorf("Failed to read signature from raw: %s", err)
 	}
 
 	var stored_crc uint16
 	err = binary.Read(crc_stream, binary.BigEndian, &stored_crc)
 	if err != nil {
-		return ret, fmt.Errorf("Failed to read CRC from raw: %s\n", err)
+		return ret, fmt.Errorf("Failed to read signature CRC from raw: %s", err)
 	}
 
 	computed_crc := crc16.Crc16(comp_bytes[:sz])
 	if stored_crc == computed_crc {
 		return ret, nil
 	} else {
-		return ret, fmt.Errorf("stored CRC: %04X computed CRC: %04X\n", stored_crc, computed_crc)
+		return ret, fmt.Errorf("Signature integrity check failed, stored CRC: %04X computed CRC: %04X", stored_crc, computed_crc)
 	}
 }
 
@@ -228,7 +230,7 @@ func (self *UserSignature) DeserializeBaseSignature(sig_bytes []byte) (BaseSigna
 
 	err := binary.Read(sig_stream, binary.BigEndian, &ret)
 	if err != nil {
-		return ret, fmt.Errorf("Failed to read Component Signature from raw: %s\n", err)
+		return ret, fmt.Errorf("Failed to read BaseSignature from raw: %s", err)
 	}
 	return ret, nil
 }
@@ -412,26 +414,66 @@ func readSigsFromFile(filename string) ([]interface{}, error) {
 	for rd := uint16(0); rd < uint16(len(sigdata_in)); rd += bsig.Signature_size {
 		bsig, err = sig.DeserializeBaseSignature(sigdata_in[rd:])
 		if err != nil {
-			return sigs, err
+			if len(sigs) > 0 {
+				// Garbage at the end of file?, consider deserialization finished successfully
+				return sigs, nil
+			} else {
+				fmt.Printf("Failed to deserialize base signature (%s)\n", err)
+				return sigs, err
+			}
 		}
 
-		// fmt.Printf("sig @ %d + %d\n", rd, bsig.Signature_size)
-		if bsig.Signature_type == SIGNATURE_TYPE_EUI64 {
+		//fmt.Printf("sig @ %d + %d\n", rd, bsig.Signature_size)
+		if bsig.Signature_size <= 0 || bsig.Signature_size > MAX_SIGNATURE_LENGTH {
+			//fmt.Printf("Done reading after %d signatures\n", len(sigs))
+			break
+		}
+
+		switch bsig.Signature_type {
+		case SIGNATURE_TYPE_EUI64: 
 			eui_sig, err := sig.DeserializeEui(sigdata_in[rd:])
 			if err != nil {
+				fmt.Printf("Failed to deserialize EUI (%s)\n", err)
 				return sigs, err
 			}
 			sigs = append(sigs, eui_sig)
-		} else {
+
+		case SIGNATURE_TYPE_BOARD: 
+			// Lazy deserialization, structure for board and platform sigs is same as component
 			comp_sig, err := sig.DeserializeComponent(sigdata_in[rd:])
 			if err != nil {
+				fmt.Printf("Failed to deserialize BoardSignature (%s)\n", err)
 				return sigs, err
 			}
 			sigs = append(sigs, comp_sig)
+		 
+		case SIGNATURE_TYPE_PLATFORM: 
+			// Lazy deserialization, structure for board and platform sigs is same as component
+			comp_sig, err := sig.DeserializeComponent(sigdata_in[rd:])
+			if err != nil {
+				fmt.Printf("Failed to deserialize PlatformSignature (%s)\n", err)
+				return sigs, err
+			}
+			sigs = append(sigs, comp_sig)
+
+		case SIGNATURE_TYPE_COMPONENT: 
+			comp_sig, err := sig.DeserializeComponent(sigdata_in[rd:])
+			if err != nil {
+				fmt.Printf("Failed to deserialize ComponentSignature (%s)\n", err)
+				return sigs, err
+			}
+			sigs = append(sigs, comp_sig)
+		 
+		default: 
+			//fmt.Printf("Unknown signature type %d\n", bsig.Signature_type)
 		}
 	}
 
-	return sigs, nil
+	if len(sigs) > 0 {
+		return sigs, nil
+	} else {
+		return sigs, errors.New("No signatures found")
+	}
 }
 
 func sigsToJson(sigs []interface{}) string {
@@ -506,7 +548,7 @@ func main() {
 		// We are reading a signature.
 		sigs, err := readSigsFromFile(opts.ReadSig)
 		if err != nil {
-			fmt.Printf("Failed to read signature from file %s\n", opts.ReadSig)
+			fmt.Printf("Failed to read signature from file [%s]: %s\n", opts.ReadSig, err)
 			os.Exit(3)
 		} else {
 			fmt.Println(sigsToJson(sigs))
