@@ -22,7 +22,7 @@ import "github.com/satori/go.uuid"
 
 var g_version_major uint8 = 3
 var g_version_minor uint8 = 0
-var g_version_patch uint8 = 0
+var g_version_patch uint8 = 1
 
 const SIGNATURE_TYPE_EUI64 = 0     // EUI64 is the IEEE Extended Unique Identifier
 const SIGNATURE_TYPE_BOARD = 1     // Boards are the core of the system - MCU
@@ -430,7 +430,7 @@ func readSigsFromFile(filename string) ([]interface{}, error) {
 		}
 
 		switch bsig.Signature_type {
-		case SIGNATURE_TYPE_EUI64: 
+		case SIGNATURE_TYPE_EUI64:
 			eui_sig, err := sig.DeserializeEui(sigdata_in[rd:])
 			if err != nil {
 				fmt.Printf("Failed to deserialize EUI (%s)\n", err)
@@ -438,7 +438,7 @@ func readSigsFromFile(filename string) ([]interface{}, error) {
 			}
 			sigs = append(sigs, eui_sig)
 
-		case SIGNATURE_TYPE_BOARD: 
+		case SIGNATURE_TYPE_BOARD:
 			// Lazy deserialization, structure for board and platform sigs is same as component
 			comp_sig, err := sig.DeserializeComponent(sigdata_in[rd:])
 			if err != nil {
@@ -446,8 +446,8 @@ func readSigsFromFile(filename string) ([]interface{}, error) {
 				return sigs, err
 			}
 			sigs = append(sigs, comp_sig)
-		 
-		case SIGNATURE_TYPE_PLATFORM: 
+
+		case SIGNATURE_TYPE_PLATFORM:
 			// Lazy deserialization, structure for board and platform sigs is same as component
 			comp_sig, err := sig.DeserializeComponent(sigdata_in[rd:])
 			if err != nil {
@@ -456,15 +456,15 @@ func readSigsFromFile(filename string) ([]interface{}, error) {
 			}
 			sigs = append(sigs, comp_sig)
 
-		case SIGNATURE_TYPE_COMPONENT: 
+		case SIGNATURE_TYPE_COMPONENT:
 			comp_sig, err := sig.DeserializeComponent(sigdata_in[rd:])
 			if err != nil {
 				fmt.Printf("Failed to deserialize ComponentSignature (%s)\n", err)
 				return sigs, err
 			}
 			sigs = append(sigs, comp_sig)
-		 
-		default: 
+
+		default:
 			//fmt.Printf("Unknown signature type %d\n", bsig.Signature_type)
 		}
 	}
