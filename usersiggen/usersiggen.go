@@ -22,7 +22,7 @@ import "github.com/satori/go.uuid"
 
 var g_version_major uint8 = 3
 var g_version_minor uint8 = 0
-var g_version_patch uint8 = 1
+var g_version_patch uint8 = 2
 
 const SIGNATURE_TYPE_EUI64 = 0     // EUI64 is the IEEE Extended Unique Identifier
 const SIGNATURE_TYPE_BOARD = 1     // Boards are the core of the system - MCU
