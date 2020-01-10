@@ -22,7 +22,7 @@ import "github.com/satori/go.uuid"
 
 var g_version_major uint8 = 3
 var g_version_minor uint8 = 0
-var g_version_patch uint8 = 1
+var g_version_patch uint8 = 2
 
 const SIGNATURE_TYPE_EUI64 = 0     // EUI64 is the IEEE Extended Unique Identifier
 const SIGNATURE_TYPE_BOARD = 1     // Boards are the core of the system - MCU
@@ -477,17 +477,34 @@ func readSigsFromFile(filename string) ([]interface{}, error) {
 }
 
 func sigsToJson(sigs []interface{}) string {
-	sigmap := map[string]interface{}{"eui_signature": nil, "component_signatures": make([]interface{}, 0)}
+	sigmap := map[string]interface{}{
+		"eui_signature": nil,
+		"board_signature": nil,
+		"platform_signature": nil,
+		"component_signatures": make([]interface{}, 0)}
 	for _, sig := range sigs {
 		switch s := sig.(type) {
 		case EUISignature:
 			sigmap["eui_signature"] = s
 		case ComponentSignature:
-			if lst, ok := sigmap["component_signatures"].([]interface{}); ok {
-				sigmap["component_signatures"] = append(lst, s)
+			// Signatures of type Board, Platform and Component have the same
+			// structure so we use ComponentSignature structure to represent
+			// them all. The field 'Signature_type' holds the intended type.
+			sig_type := s.Signature_type
+			switch sig_type {
+			case SIGNATURE_TYPE_BOARD:
+				sigmap["board_signature"] = s
+			case SIGNATURE_TYPE_PLATFORM:
+				sigmap["platform_signature"] = s
+			case SIGNATURE_TYPE_COMPONENT:
+				if lst, ok := sigmap["component_signatures"].([]interface{}); ok {
+					sigmap["component_signatures"] = append(lst, s)
+				}
+			default:
+				fmt.Printf("Unknown signature type %d\n", sig_type)
 			}
 		default:
-			fmt.Printf("tp default")
+			fmt.Printf("tp default\n")
 		}
 	}
 
