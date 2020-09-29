@@ -193,6 +193,11 @@ func main() {
 		}
 	}
 
+	if (len(opts.Eui) == 0) && (len(opts.Euifile) == 0) {
+		fmt.Printf("Specify eui or euifile\n")
+		os.Exit(2)
+	}
+
 	if _, err = os.Stat(opts.Licdir); os.IsNotExist(err) {
 		err = os.Mkdir(opts.Licdir, 0770)
 		if err != nil {
@@ -215,7 +220,6 @@ func main() {
 	}
 
 	privKey, err := getPrivateKey(opts.Keyfile)
-	fmt.Printf("%s\n", privKey)
 	if err != nil {
 		fmt.Printf("ERROR getting private key: %s\n", err)
 		os.Exit(1)
