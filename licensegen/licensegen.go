@@ -47,27 +47,17 @@ func printGeneratorVersion() {
 	fmt.Printf("Device signature generator %d.%d.%d\n", g_version_major, g_version_minor, g_version_patch)
 }
 
-func getEui(infile string) (eui64, error) {
-	in, err := os.Open(infile)
+func getEuiList(infile string) ([]string, error) {
+	var splits []string
+
+	b, err := ioutil.ReadFile(infile)
 	if err != nil {
-		return 0, err
+		return splits, err
 	}
-	defer in.Close()
+	str := string(b)
+	splits = strings.Split(str, "\n")
 
-	scanner := bufio.NewScanner(bufio.NewReader(in))
-
-	for scanner.Scan() {
-		t := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(t, "#") == false {
-			splits := strings.Split(t, ",")
-
-			if len(splits) == 1 || (len(splits) == 2 && len(splits[1]) == 0) {
-				return parseEui(splits[0])
-			}
-		}
-	}
-
-	return 0, errors.New(fmt.Sprintf("Could not find a suitable EUI64 in %s!", infile))
+	return splits, nil
 }
 
 func getBeatstackParams(infile string) (BeatstackParams, error) {
@@ -138,7 +128,7 @@ func getPrivateKey(infile string) (*ecdsa.PrivateKey, error) {
 	return privKey, nil
 }
 
-func ConstructPreSign(eui eui64, t time.Time, p BeatstackParams) (PreSigning, error) {
+func ConstructPreSign(eui eui64, t time.Time, p BeatstackParams) (PreSigning) {
 	var ps PreSigning
 
 	ps.LicenseId = LICENSE_TYPE
@@ -146,7 +136,7 @@ func ConstructPreSign(eui eui64, t time.Time, p BeatstackParams) (PreSigning, er
 	ps.UnixTime = t.Unix()
 	ps.BeatParams = p
 
-	return ps, nil
+	return ps
 }
 
 func Serialize(ps PreSigning) ([]byte, error) {
@@ -231,6 +221,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	var euiList []string
 	overrideEui := false
 	if len(opts.Eui) > 0 {
 		if len(opts.Eui) != 16 {
@@ -238,54 +229,50 @@ func main() {
 			os.Exit(1)
 		}
 		overrideEui = true
-		eui, err = parseEui(opts.Eui)
-		if err != nil {
-			fmt.Printf("ERROR parsing EUI64: %s\n", err)
-			os.Exit(1)
-		}
+		euiList = strings.Split(opts.Eui, " ")
 	} else {
-		eui, err = getEui(opts.Euifile)
+		euiList, err = getEuiList(opts.Euifile)
 		if err != nil {
 			fmt.Printf("ERROR getting EUI64: %s\n", err)
 			os.Exit(1)
 		}
 	}
 
-	preSign, err := ConstructPreSign(eui, timestamp, bp)
+	for _, euiString := range euiList {
+		eui, err = parseEui(euiString)
+		preSign := ConstructPreSign(eui, timestamp, bp)
 
-	serPreSign, err := Serialize(preSign)
-	if err != nil {
-		fmt.Printf("ERROR generating serPreSign: %s\n", err)
-		os.Exit(1)
-	}
-
-	r, s, err := ecdsa.Sign(rand.Reader, privKey, serPreSign)
-	if err != nil {
-		fmt.Printf("ERROR signing the message: %s\n", err)
-		os.Exit(1)
-	}
-
-	licfile := filepath.Join(opts.Licdir, fmt.Sprintf("EUI-64_%016X.bin", eui))
-	if overrideEui == false {
-		if _, err := os.Stat(licfile); err == nil {
-			fmt.Printf("ERROR generating licdata: license file for %016X exists at %s\n", eui, licfile)
+		serPreSign, err := Serialize(preSign)
+		if err != nil {
+			fmt.Printf("ERROR generating serPreSign: %s\n", err)
 			os.Exit(1)
 		}
-	}
 
-	fmt.Printf("r: %X\n", r)
-	fmt.Printf("s: %X\n", s)
+		r, s, err := ecdsa.Sign(rand.Reader, privKey, serPreSign)
+		if err != nil {
+			fmt.Printf("ERROR signing the message: %s\n", err)
+			os.Exit(1)
+		}
 
-	licdata := append(serPreSign, r.Bytes()...)
-	licdata = append(licdata, s.Bytes()...)
-	if err := ioutil.WriteFile(licfile, licdata, 0440); err != nil {
-		fmt.Printf("ERROR writing output file: %s\n", err)
-		os.Exit(1)
-	}
+		licfile := filepath.Join(opts.Licdir, fmt.Sprintf("EUI-64_%016X.bin", eui))
+		if overrideEui == false {
+			if _, err := os.Stat(licfile); err == nil {
+				fmt.Printf("ERROR generating licdata: license file for %016X exists at %s\n", eui, licfile)
+				os.Exit(1)
+			}
+		}
 
-	if err := ioutil.WriteFile(opts.Output, licdata, 0640); err != nil {
-		fmt.Printf("ERROR writing output file: %s\n", err)
-		os.Exit(1)
+		licdata := append(serPreSign, r.Bytes()...)
+		licdata = append(licdata, s.Bytes()...)
+		if err := ioutil.WriteFile(licfile, licdata, 0440); err != nil {
+			fmt.Printf("ERROR writing output file: %s\n", err)
+			os.Exit(1)
+		}
+
+		if err := ioutil.WriteFile(opts.Output, licdata, 0640); err != nil {
+			fmt.Printf("ERROR writing output file: %s\n", err)
+			os.Exit(1)
+		}
 	}
 
 	if opts.Debug {
