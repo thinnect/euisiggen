@@ -22,8 +22,6 @@ var g_version_major uint8 = 0
 var g_version_minor uint8 = 0
 var g_version_patch uint8 = 1
 
-const LICENSE_TYPE = 4
-
 type eui64 uint64
 
 type BeatstackParams struct {
@@ -33,7 +31,10 @@ type BeatstackParams struct {
 }
 
 type PreSigning struct {
-	LicenseId  uint8
+	Version_major uint8
+	Version_minor uint8
+	Version_patch uint8
+
 	Eui64      eui64
 	UnixTime   int64
 	BeatParams BeatstackParams
@@ -131,7 +132,10 @@ func getPrivateKey(infile string) (*ecdsa.PrivateKey, error) {
 func ConstructPreSign(eui eui64, t time.Time, p BeatstackParams) (PreSigning) {
 	var ps PreSigning
 
-	ps.LicenseId = LICENSE_TYPE
+	ps.Version_major = g_version_major
+	ps.Version_minor = g_version_minor
+	ps.Version_patch = g_version_patch
+
 	ps.Eui64 = eui
 	ps.UnixTime = t.Unix()
 	ps.BeatParams = p
