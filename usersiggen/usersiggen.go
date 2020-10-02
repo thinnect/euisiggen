@@ -21,13 +21,14 @@ import "github.com/joaojeronimo/go-crc16"
 import "github.com/satori/go.uuid"
 
 var g_version_major uint8 = 3
-var g_version_minor uint8 = 0
-var g_version_patch uint8 = 2
+var g_version_minor uint8 = 1
+var g_version_patch uint8 = 0
 
 const SIGNATURE_TYPE_EUI64 = 0     // EUI64 is the IEEE Extended Unique Identifier
 const SIGNATURE_TYPE_BOARD = 1     // Boards are the core of the system - MCU
 const SIGNATURE_TYPE_PLATFORM = 2  // Platforms define the set of components
 const SIGNATURE_TYPE_COMPONENT = 3 // Components list individual parts of a platform
+const SIGNATURE_TYPE_LICENSE = 4   // License file identifier.
 
 const MAX_SIGNATURE_LENGTH = 1024  // Sanity checking signature lengths
 
@@ -96,6 +97,14 @@ type ComponentSignature struct {
 
 	Data_length uint16 `json:"data_length"` // Length of the component specific data
 	// data     []byte  // compoent specific data - calibration etc
+
+	// crc uint16
+}
+
+type LicenseSignature struct {
+	BaseSignature
+
+	Lic_file   []byte `json:"lic_file"`
 
 	// crc uint16
 }
@@ -205,6 +214,8 @@ func (self *UserSignature) DeserializeComponent(comp_bytes []byte) (ComponentSig
 	comp_stream := bytes.NewReader(comp_bytes[:sz])
 	crc_stream := bytes.NewReader(comp_bytes[sz : sz+2])
 
+
+
 	err := binary.Read(comp_stream, binary.BigEndian, &ret)
 	if err != nil {
 		return ret, fmt.Errorf("Failed to read signature from raw: %s", err)
@@ -223,6 +234,35 @@ func (self *UserSignature) DeserializeComponent(comp_bytes []byte) (ComponentSig
 		return ret, fmt.Errorf("Signature integrity check failed, stored CRC: %04X computed CRC: %04X", stored_crc, computed_crc)
 	}
 }
+
+func (self *UserSignature) DeserializeLicense(lic_bytes []byte) (LicenseSignature, error) {
+	var ret LicenseSignature
+
+	comp_stream := bytes.NewReader(lic_bytes[:binary.Size(BaseSignature{})])
+	err := binary.Read(comp_stream, binary.BigEndian, &ret.BaseSignature)
+	if err != nil {
+		return ret, fmt.Errorf("Failed to read signature from raw: %s", err)
+	}
+
+	sz := uint16(ret.Signature_size - 2)
+	ret.Lic_file = lic_bytes[binary.Size(BaseSignature{}) : sz]
+
+	var stored_crc uint16
+	crc_stream := bytes.NewReader(lic_bytes[sz : sz+2])
+
+	err = binary.Read(crc_stream, binary.BigEndian, &stored_crc)
+	if err != nil {
+		return ret, fmt.Errorf("Failed to read signature CRC from raw: %s", err)
+	}
+
+	computed_crc := crc16.Crc16(lic_bytes[:sz])
+	if stored_crc == computed_crc {
+		return ret, nil
+	} else {
+		return ret, fmt.Errorf("Signature integrity check failed, stored CRC: %04X computed CRC: %04X", stored_crc, computed_crc)
+	}
+}
+
 
 func (self *UserSignature) DeserializeBaseSignature(sig_bytes []byte) (BaseSignature, error) {
 	var ret BaseSignature
@@ -425,7 +465,7 @@ func readSigsFromFile(filename string) ([]interface{}, error) {
 
 		//fmt.Printf("sig @ %d + %d\n", rd, bsig.Signature_size)
 		if bsig.Signature_size <= 0 || bsig.Signature_size > MAX_SIGNATURE_LENGTH {
-			//fmt.Printf("Done reading after %d signatures\n", len(sigs))
+			//fmt.Printf("Done reading after %d signatures.\n", len(sigs))
 			break
 		}
 
@@ -464,6 +504,15 @@ func readSigsFromFile(filename string) ([]interface{}, error) {
 			}
 			sigs = append(sigs, comp_sig)
 
+		case SIGNATURE_TYPE_LICENSE:
+			var licsig LicenseSignature
+			licsig, err := sig.DeserializeLicense(sigdata_in[rd:])
+			if err != nil {
+				fmt.Printf("Failed to deserialize LicenseSignature (%s)\n", err)
+				return sigs, err
+			}
+			sigs = append(sigs, licsig)
+
 		default:
 			//fmt.Printf("Unknown signature type %d\n", bsig.Signature_type)
 		}
@@ -481,12 +530,15 @@ func sigsToJson(sigs []interface{}) string {
 		"eui_signature": nil,
 		"board_signature": nil,
 		"platform_signature": nil,
+		"license": nil,
 		"component_signatures": make([]interface{}, 0)}
 	for _, sig := range sigs {
+
 		switch s := sig.(type) {
 		case EUISignature:
 			sigmap["eui_signature"] = s
 		case ComponentSignature:
+
 			// Signatures of type Board, Platform and Component have the same
 			// structure so we use ComponentSignature structure to represent
 			// them all. The field 'Signature_type' holds the intended type.
@@ -503,6 +555,8 @@ func sigsToJson(sigs []interface{}) string {
 			default:
 				fmt.Printf("Unknown signature type %d\n", sig_type)
 			}
+		case LicenseSignature:
+			sigmap["license"] = s
 		default:
 			fmt.Printf("tp default\n")
 		}
@@ -512,13 +566,67 @@ func sigsToJson(sigs []interface{}) string {
 	return string(j)
 }
 
+func parseLicenseFile(infile string, t time.Time) ([]byte, error) {
+	buf := new(bytes.Buffer)
+	b, err := ioutil.ReadFile(infile)
+	if err != nil {
+		return nil, err
+	}
+
+	sig := new(LicenseSignature)
+	sig.Sig_version_major = g_version_major
+	sig.Sig_version_minor = g_version_minor
+	sig.Sig_version_patch = g_version_patch
+
+	sig.Signature_size = uint16(len(b)) + uint16(binary.Size(BaseSignature{})) + 2
+	sig.Signature_type = uint8(SIGNATURE_TYPE_LICENSE)
+
+	sig.Unix_time = t.Unix()
+
+	err = binary.Write(buf, binary.BigEndian, sig.BaseSignature)
+	if err != nil {
+		return nil, err
+	}
+
+	z := bytes.NewBuffer(b)
+	err = binary.Write(buf, binary.BigEndian, z.Bytes())
+	if err != nil {
+		return nil, err
+	}
+
+	crc := crc16.Crc16(buf.Bytes())
+	err = binary.Write(buf, binary.BigEndian, crc)
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
+func appendFile(outfile string, data []byte) error {
+	f, err := os.OpenFile(outfile, os.O_APPEND|os.O_WRONLY, 0640)
+	if err != nil {
+		fmt.Printf("ERROR opening output file: %s\n", err)
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		fmt.Printf("ERROR writing output file: %s\n", err)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		fmt.Printf("ERROR closing output file: %s\n", err)
+		return err
+	}
+	return nil
+}
+
 func printGeneratorVersion() {
 	fmt.Printf("Device signature generator %d.%d.%d\n", g_version_major, g_version_minor, g_version_patch)
 }
 
 func main() {
 	var opts struct {
-		Type string `long:"type" description:"Signature type - board, platform, component"`
+		Type string `long:"type" description:"Signature type - board, platform, component. License."`
 
 		Name         string       `long:"name"         description:"The name of the component that the user signature will be used for."`
 		Version      BoardVersion `long:"version"      description:"The version of the board X.Y.Z."`
@@ -532,6 +640,8 @@ func main() {
 		Eui     string `long:"eui"     default:""        description:"Do not retrieve EUI from euifile, override with the specified EUI."`
 		Euifile string `long:"euifile" default:"eui.txt" description:"The file containing available EUIs."`
 		Sigdir  string `long:"sigdir"  default:"sigdata" description:"Where to store EUI_XXXXXXXXXXXXXXXX.bin files."`
+
+		Licfile string `long:"licfile"  description:"Generated license file."`
 
 		Timestamp int64 `long:"timestamp" description:"Use the specified timestamp."`
 
@@ -573,6 +683,35 @@ func main() {
 		}
 	}
 
+	var timestamp time.Time
+	if opts.Timestamp > 0 {
+		timestamp = time.Unix(opts.Timestamp, 0).UTC()
+	} else {
+		timestamp = time.Now().UTC()
+	}
+
+	if opts.Type == "license" {
+		var licdata []byte
+		if _, err := os.Stat(opts.Output); os.IsNotExist(err) {
+			fmt.Printf("ERROR initial signature file %s not found!", opts.Output)
+			os.Exit(1)
+		}
+		if len(opts.Licfile) != 0 {
+			licdata, err = parseLicenseFile(opts.Licfile, timestamp)
+			if err != nil {
+				fmt.Printf("ERROR parsing license file: %s\n", err)
+				os.Exit(1)
+			}
+		}
+
+		err = appendFile(opts.Output, licdata)
+		if err != nil {
+			fmt.Printf("ERROR appending license data to file: %s\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	// We are generating a signature. Verify mandatory options for this operation
 	required_opts := []string{"type", "name", "version", "uuid", "manufacturer"}
 	for _, long_opt_name := range required_opts {
@@ -589,13 +728,6 @@ func main() {
 			fmt.Printf("ERROR creating output directory: %s\n", err)
 			os.Exit(1)
 		}
-	}
-
-	var timestamp time.Time
-	if opts.Timestamp > 0 {
-		timestamp = time.Unix(opts.Timestamp, 0).UTC()
-	} else {
-		timestamp = time.Now().UTC()
 	}
 
 	var component_uuid [16]byte
@@ -743,17 +875,9 @@ func main() {
 			os.Exit(1)
 		}
 
-		f, err := os.OpenFile(opts.Output, os.O_APPEND|os.O_WRONLY, 0640)
+		err = appendFile(opts.Output, csigdata)
 		if err != nil {
-			fmt.Printf("ERROR opening output file: %s\n", err)
-			os.Exit(1)
-		}
-		if _, err := f.Write(csigdata); err != nil {
-			fmt.Printf("ERROR writing output file: %s\n", err)
-			os.Exit(1)
-		}
-		if err := f.Close(); err != nil {
-			fmt.Printf("ERROR closing output file: %s\n", err)
+			fmt.Printf("ERROR appending platform/component data to file: %s\n", err)
 			os.Exit(1)
 		}
 	} else {
