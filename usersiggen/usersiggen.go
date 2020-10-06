@@ -638,7 +638,7 @@ func main() {
 		SerialUUID string `long:"serialuuid" description:"Serial number, UUID format. 16 bytes."`
 
 		Eui     string `long:"eui"     default:""        description:"Do not retrieve EUI from euifile, override with the specified EUI."`
-		Euifile string `long:"euifile" default:"eui.txt" description:"The file containing available EUIs."`
+		Euifile string `long:"euifile"                   description:"The file containing available EUIs."`
 		Sigdir  string `long:"sigdir"  default:"sigdata" description:"Where to store EUI_XXXXXXXXXXXXXXXX.bin files."`
 
 		Licfile string `long:"licfile"  description:"Generated license file."`
@@ -765,6 +765,7 @@ func main() {
 
 	if opts.Type == "board" {
 		overrideEui := false
+		includeEui := true
 		if len(opts.Eui) > 0 {
 			if len(opts.Eui) != 16 {
 				fmt.Printf("ERROR specified override EUI64 '%s' is not suitable!", opts.Eui)
@@ -776,35 +777,45 @@ func main() {
 				fmt.Printf("ERROR parsing EUI64: %s\n", err)
 				os.Exit(1)
 			}
-		} else {
+		} else if len(opts.Euifile) > 0 {
 			eui, err = getEui(opts.Euifile)
 			if err != nil {
 				fmt.Printf("ERROR getting EUI64: %s\n", err)
 				os.Exit(1)
 			}
+		} else {
+			includeEui = false
+			fmt.Printf("Generating signature without EUI64.\n")
 		}
 
-		sigfile := filepath.Join(opts.Sigdir, fmt.Sprintf("EUI-64_%016X.bin", eui))
-		if overrideEui == false {
-			if _, err := os.Stat(sigfile); err == nil {
-				fmt.Printf("ERROR generating sigdata: signature file for %016X exists at %s\n", eui, sigfile)
+		var sigfile string
+		var esig *EUISignature
+		var esigdata []byte
+		if includeEui == true {
+			sigfile = filepath.Join(opts.Sigdir, fmt.Sprintf("EUI-64_%016X.bin", eui))
+			if overrideEui == false {
+				if _, err := os.Stat(sigfile); err == nil {
+					fmt.Printf("ERROR generating sigdata: signature file for %016X exists at %s\n", eui, sigfile)
+					os.Exit(1)
+				}
+			}
+
+			esig, err = gen.ConstructEUISignature(timestamp, eui)
+			if err != nil {
+				fmt.Printf("ERROR generating sigdata: %s\n", err)
 				os.Exit(1)
 			}
-		}
 
-		esig, err := gen.ConstructEUISignature(timestamp, eui)
-		if err != nil {
-			fmt.Printf("ERROR generating sigdata: %s\n", err)
-			os.Exit(1)
+			esigdata, err = gen.Serialize(esig)
+			if err != nil {
+				fmt.Printf("ERROR generating sigdata: %s\n", err)
+				os.Exit(1)
+			}
+		} else {
+			sigfile = filepath.Join(opts.Sigdir, fmt.Sprintf("Tstmp_%d.bin", timestamp.Unix()))
 		}
 
 		csig, err := gen.ConstructComponentSignature(timestamp, opts.Name, opts.Version, component_uuid, manufacturer_uuid, serial, opts.Position, SIGNATURE_TYPE_BOARD)
-		if err != nil {
-			fmt.Printf("ERROR generating sigdata: %s\n", err)
-			os.Exit(1)
-		}
-
-		esigdata, err := gen.Serialize(esig)
 		if err != nil {
 			fmt.Printf("ERROR generating sigdata: %s\n", err)
 			os.Exit(1)
@@ -816,7 +827,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		if overrideEui == false {
+		if overrideEui == false && includeEui == true {
 			if err := markEui(opts.Euifile, *esig, *csig); err != nil {
 				fmt.Printf("ERROR marking %016X in %s: %s\n", eui, opts.Euifile, err)
 				os.Exit(1)
@@ -848,7 +859,11 @@ func main() {
 			os.Exit(1)
 		}
 
-		fmt.Printf("EUI-64: %016X\n", eui)
+		if includeEui == true {
+			fmt.Printf("EUI-64: %016X\n", eui)
+		} else {
+			fmt.Printf("Timestamp: %d\n", timestamp.Unix())
+		}
 
 	} else if opts.Type == "platform" || opts.Type == "component" {
 		var tp uint8
