@@ -21,7 +21,7 @@ import "github.com/joaojeronimo/go-crc16"
 import "github.com/satori/go.uuid"
 
 var g_version_major uint8 = 3
-var g_version_minor uint8 = 1
+var g_version_minor uint8 = 2
 var g_version_patch uint8 = 0
 
 const SIGNATURE_TYPE_EUI64 = 0     // EUI64 is the IEEE Extended Unique Identifier
