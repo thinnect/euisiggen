@@ -604,7 +604,7 @@ func parseLicenseFile(infile string, t time.Time) ([]byte, error) {
 }
 
 func appendFile(outfile string, data []byte) error {
-	f, err := os.OpenFile(outfile, os.O_APPEND|os.O_WRONLY, 0640)
+	f, err := os.OpenFile(outfile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
 	if err != nil {
 		fmt.Printf("ERROR opening output file: %s\n", err)
 		return err
@@ -642,6 +642,7 @@ func main() {
 		Sigdir  string `long:"sigdir"  default:"sigdata" description:"Where to store EUI_XXXXXXXXXXXXXXXX.bin files."`
 
 		Licfile string `long:"licfile"  description:"Generated license file."`
+		Sigfile string `long:"sigfile"  description:"Signature file to append license to."`
 
 		Timestamp int64 `long:"timestamp" description:"Use the specified timestamp."`
 
@@ -691,19 +692,34 @@ func main() {
 	}
 
 	if opts.Type == "license" {
-		var licdata []byte
-		if _, err := os.Stat(opts.Output); os.IsNotExist(err) {
-			fmt.Printf("ERROR initial signature file %s not found!", opts.Output)
+		if _, err := os.Stat(opts.Sigfile); os.IsNotExist(err) {
+			fmt.Printf("ERROR initial signature file %s not found!\n", opts.Sigfile)
 			os.Exit(1)
 		}
-		if len(opts.Licfile) != 0 {
-			licdata, err = parseLicenseFile(opts.Licfile, timestamp)
-			if err != nil {
-				fmt.Printf("ERROR parsing license file: %s\n", err)
-				os.Exit(1)
-			}
+
+		if _, err := os.Stat(opts.Licfile); os.IsNotExist(err) {
+			fmt.Printf("ERROR initial license file %s not found!\n", opts.Licfile)
+			os.Exit(1)
 		}
 
+		if _, err := os.Stat(opts.Output); os.IsExist(err) {
+			fmt.Printf("ERROR output file %s already exists.\n", opts.Output)
+			os.Exit(1)
+		}
+
+		licdata, err := parseLicenseFile(opts.Licfile, timestamp)
+		if err != nil {
+			fmt.Printf("ERROR parsing license file: %s\n", err)
+			os.Exit(1)
+		}
+
+		sigfiledata, err := ioutil.ReadFile(opts.Sigfile)
+		if err != nil {
+			fmt.Printf("ERROR reading signature file: %s\n", err)
+			os.Exit(1)
+		}
+
+		licdata = append(sigfiledata, licdata...)
 		err = appendFile(opts.Output, licdata)
 		if err != nil {
 			fmt.Printf("ERROR appending license data to file: %s\n", err)
