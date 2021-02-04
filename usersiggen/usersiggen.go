@@ -22,7 +22,7 @@ import "github.com/satori/go.uuid"
 
 var g_version_major uint8 = 3
 var g_version_minor uint8 = 3
-var g_version_patch uint8 = 0
+var g_version_patch uint8 = 1
 
 const SIGNATURE_TYPE_EUI64 = 0     // EUI64 is the IEEE Extended Unique Identifier
 const SIGNATURE_TYPE_BOARD = 1     // Boards are the core of the system - MCU
@@ -762,7 +762,7 @@ func main() {
 
 	var serial [16]byte
 	if len(opts.SerialUUID) > 0 {
-		serial, err = uuid.FromString(opts.UUID)
+		serial, err = uuid.FromString(opts.SerialUUID)
 		if err != nil {
 			fmt.Printf("Serial UUID error(%d)", err)
 			os.Exit(1)
